@@ -21,6 +21,9 @@ public partial class MainWindow : Window
 	private readonly StickWindowMover _mover;
 	public MainWindowViewModel ViewModel => (MainWindowViewModel)this.DataContext;
 
+	// Remember when the window opened
+	private DateTime _lastShowTime;
+
 	public MainWindow(AppControllerCore controller)
 	{
 		LanguageService.Switch();
@@ -128,6 +131,9 @@ public partial class MainWindow : Window
 	{
 		try
 		{
+			// Reset timer: mark the exact time the window appeared
+        	_lastShowTime = DateTime.Now;
+
 			this.Topmost = true;
 
 			// When a window is deactivated, a focused element will lose focus and usually,
@@ -204,38 +210,48 @@ public partial class MainWindow : Window
         GetClassName(hwnd, className, nChars);
 
         string name = className.ToString();
-        // Check for standard Taskbar or Multi-monitor Taskbar classes
-        return name == "Shell_TrayWnd" || name == "Shell_SecondaryTrayWnd";
+        // Check if the currently active window from this list
+		return name == "Shell_TrayWnd" ||                  		// Main Taskbar
+               name == "Shell_SecondaryTrayWnd" ||         		// Second Monitor Taskbar
+               name == "NotifyIconOverflowWindow" ||       		// Hidden Icons Menu (Win 10)
+               name == "TopLevelWindowForOverflowXamlIsland"; 	// Hidden Icons Menu (Win 11)
     }
 
 	private void OnDeactivated(object sender, EventArgs e)
-	{
-		// Check who stole the focus
+    {
+        HandleDeactivation();
+    }
+
+    protected override void OnDeactivated(EventArgs e)
+    {
+        base.OnDeactivated(e);
+        HandleDeactivation();
+    }
+
+	private void HandleDeactivation()
+    {
+        // Time-based Immunity (0.5 seconds)
+        // If the main-window just opened, ignore ALL focus loss
+        // Handles the chaotic moment when the "Hidden Icons" menu closes
+		// 	(in situation when the Monitorian tray icon is inside the Hidden Icons Menu and not directly on taskbar)
+        if ((DateTime.Now - _lastShowTime).TotalMilliseconds < 500)
+        {
+            this.Activate(); // Force stay open
+            return;
+        }
+
+        // Class-based Immunity
+        // If the Taskbar or Icon Overflow menu stole focus, stay open
         if (IsTaskbarActive())
         {
-            // If it was the Taskbar, ignore the close command
-            // Immediately steal focus back so the next real click is registered
             this.Activate();
             return;
         }
 
-        // If it was anyone else (Desktop, another Program, etc.), close normally
+        // Otherwise, close normally
         ProceedHide();
-	}
-
-	protected override void OnDeactivated(EventArgs e)
-	{
-		base.OnDeactivated(e);
-
-        if (IsTaskbarActive())
-        {
-            this.Activate();
-            return;
-        }
-		
-        ProceedHide();
-	}
-
+    }
+	
 	private void ProceedHide()
 	{
 		if (this.Visibility is not Visibility.Visible)
