@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
+using System.Runtime.InteropServices;
+using System.Text;
 
 using Monitorian.Core.Helper;
 using Monitorian.Core.Models;
@@ -186,16 +188,52 @@ public partial class MainWindow : Window
 	public bool CanBeShown => (_preventionTime < DateTimeOffset.Now);
 	private DateTimeOffset _preventionTime;
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    private bool IsTaskbarActive()
+    {
+        var hwnd = GetForegroundWindow();
+        if (hwnd == IntPtr.Zero) return false;
+
+        const int nChars = 256;
+        StringBuilder className = new StringBuilder(nChars);
+        GetClassName(hwnd, className, nChars);
+
+        string name = className.ToString();
+        // Check for standard Taskbar or Multi-monitor Taskbar classes
+        return name == "Shell_TrayWnd" || name == "Shell_SecondaryTrayWnd";
+    }
+
 	private void OnDeactivated(object sender, EventArgs e)
 	{
-		ProceedHide();
+		// Check who stole the focus
+        if (IsTaskbarActive())
+        {
+            // If it was the Taskbar, ignore the close command
+            // Immediately steal focus back so the next real click is registered
+            this.Activate();
+            return;
+        }
+
+        // If it was anyone else (Desktop, another Program, etc.), close normally
+        ProceedHide();
 	}
 
 	protected override void OnDeactivated(EventArgs e)
 	{
 		base.OnDeactivated(e);
 
-		ProceedHide();
+        if (IsTaskbarActive())
+        {
+            this.Activate();
+            return;
+        }
+		
+        ProceedHide();
 	}
 
 	private void ProceedHide()

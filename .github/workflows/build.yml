@@ -1,0 +1,32 @@
+name: Build Monitorian
+
+on:
+  push:
+    branches: [ "feat/fix-MainWindow-automatic-hiding" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v2
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Restore NuGet Packages
+      run: nuget restore Source/Monitorian.sln
+
+    - name: Build Solution
+      run: msbuild Source/Monitorian.sln /p:Configuration=Release /p:Platform="Any CPU"
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: Monitorian
+        path: Source/Monitorian/bin/Release/
