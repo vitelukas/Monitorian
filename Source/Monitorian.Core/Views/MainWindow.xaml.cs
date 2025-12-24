@@ -21,9 +21,6 @@ public partial class MainWindow : Window
 	private readonly StickWindowMover _mover;
 	public MainWindowViewModel ViewModel => (MainWindowViewModel)this.DataContext;
 
-	// Remember when the window opened
-	private DateTime _lastShowTime;
-
 	public MainWindow(AppControllerCore controller)
 	{
 		LanguageService.Switch();
@@ -131,9 +128,6 @@ public partial class MainWindow : Window
 	{
 		try
 		{
-			// Reset timer: mark the exact time the window appeared
-        	_lastShowTime = DateTime.Now;
-
 			this.Topmost = true;
 
 			// When a window is deactivated, a focused element will lose focus and usually,
@@ -200,6 +194,12 @@ public partial class MainWindow : Window
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
     private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X; public int Y; }
+
+    [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out POINT lpPoint);
+
     private bool IsTaskbarActive()
     {
         var hwnd = GetForegroundWindow();
@@ -210,11 +210,44 @@ public partial class MainWindow : Window
         GetClassName(hwnd, className, nChars);
 
         string name = className.ToString();
+
         // Check if the currently active window from this list
-		return name == "Shell_TrayWnd" ||                  		// Main Taskbar
-               name == "Shell_SecondaryTrayWnd" ||         		// Second Monitor Taskbar
-               name == "NotifyIconOverflowWindow" ||       		// Hidden Icons Menu (Win 10)
-               name == "TopLevelWindowForOverflowXamlIsland"; 	// Hidden Icons Menu (Win 11)
+        return name == "Shell_TrayWnd" || 
+               name == "Shell_SecondaryTrayWnd" || 
+               name == "NotifyIconOverflowWindow" || 
+               name == "TopLevelWindowForOverflowXamlIsland" ||
+               // The Desktop (Progman/WorkerW)
+               // When the Overflow menu closes, focus often falls back to the Desktop
+               // We instead consider the Desktop "safe" and check Mouse Position instead
+               name == "Progman" ||
+               name == "WorkerW";
+    }
+
+	private bool IsMouseSafelyOverWindow()
+    {
+        // Get mouse coordinates
+        if (!GetCursorPos(out POINT p)) return false;
+
+        // Get window coordinates
+        // Use PointToScreen to handle DPI scaling correctly
+        Point topLeft;
+        Point bottomRight;
+        try 
+        {
+             topLeft = this.PointToScreen(new Point(0, 0));
+             bottomRight = this.PointToScreen(new Point(this.ActualWidth, this.ActualHeight));
+        }
+        catch 
+		{ 
+			return false; // Window might not be visible yet
+		}
+
+        // Add a 10-pixel "buffer" zone around the window to handle 
+        // the tiny gap between the tray icon and the window.
+        int buffer = 10;
+        // Check if the mouse is inside the window
+        return (p.X >= topLeft.X - buffer && p.X <= bottomRight.X + buffer &&
+                p.Y >= topLeft.Y - buffer && p.Y <= bottomRight.Y + buffer);
     }
 
 	private void OnDeactivated(object sender, EventArgs e)
@@ -230,25 +263,23 @@ public partial class MainWindow : Window
 
 	private void HandleDeactivation()
     {
-        // Time-based Immunity (0.5 seconds)
-        // If the main-window just opened, ignore ALL focus loss
-        // Handles the chaotic moment when the "Hidden Icons" menu closes
-		// 	(in situation when the Monitorian tray icon is inside the Hidden Icons Menu and not directly on taskbar)
-        if ((DateTime.Now - _lastShowTime).TotalMilliseconds < 500)
+        // If the user's mouse is hovering over the Monitorian window,
+        // ignore any focus loss (Taskbar, Desktop, Overflow menu)
+        if (IsMouseSafelyOverWindow())
         {
-            this.Activate(); // Force stay open
+            this.Activate(); 
             return;
         }
 
-        // Class-based Immunity
-        // If the Taskbar or Icon Overflow menu stole focus, stay open
+        // If the mouse is NOT over the window, check if the Taskbar or Overflow
+        // is active. If so, we still keep it open (waiting for mouse to move).
         if (IsTaskbarActive())
         {
             this.Activate();
             return;
         }
 
-        // Otherwise, close normally
+        // If mouse is outside of the main-window => close it
         ProceedHide();
     }
 	
